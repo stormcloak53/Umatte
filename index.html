@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebTube - Subscriptions, Goldmine Discover & Auto-Failover</title>
+    <style>
+        :root {
+            --bg-color: #0f0f0f;
+            --surface-color: #212121;
+            --text-color: #f1f1f1;
+            --accent-color: #ff0000;
+            --secondary-text: #aaa;
+            --border-color: #303030;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Roboto, Arial, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); min-height: 100vh; padding-bottom: 40px; }
+        
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 16px; background: var(--surface-color); position: sticky; top: 0; z-index: 100;
+        }
+        .logo { font-size: 1.2rem; font-weight: bold; color: var(--accent-color); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+        .search-box { display: flex; flex: 1; max-width: 500px; margin: 0 16px; }
+        .search-box input {
+            width: 100%; padding: 8px 12px; background: #121212; border: 1px solid var(--border-color);
+            color: #fff; border-radius: 20px 0 0 20px; outline: none; font-size: 0.95rem;
+        }
+        .search-box button {
+            padding: 0 16px; background: var(--border-color); border: 1px solid var(--border-color); color: #fff;
+            border-radius: 0 20px 20px 0; cursor: pointer;
+        }
+        .header-icons { display: flex; gap: 10px; }
+        .icon-btn {
+            background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer;
+            padding: 6px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        }
+        .icon-btn:hover { background: rgba(255,255,255,0.1); }
+        
+        /* Navigation Tabs */
+        .nav-tabs {
+            display: flex; gap: 8px; padding: 12px 16px; background: var(--surface-color);
+            border-top: 1px solid var(--border-color); overflow-x: auto;
+        }
+        .tab-btn {
+            background: #121212; border: 1px solid var(--border-color); color: var(--text-color);
+            padding: 6px 14px; border-radius: 16px; cursor: pointer; font-size: 0.85rem; white-space: nowrap;
+        }
+        .tab-btn.active { background: var(--accent-color); border-color: var(--accent-color); }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+        
+        /* Grid Layout */
+        .video-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;
+        }
+        .video-card {
+            background: var(--surface-color); border-radius: 12px; overflow: hidden; cursor: pointer;
+            transition: transform 0.2s; display: flex; flex-direction: column; position: relative;
+        }
+        .video-card:hover { transform: translateY(-2px); }
+        .thumbnail-container { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; }
+        .thumbnail-container img { width: 100%; height: 100%; object-fit: cover; }
+        .video-info { padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+        .video-title { font-size: 0.95rem; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .video-channel { font-size: 0.8rem; color: var(--secondary-text); }
+        
+        /* Player View Styles */
+        #player-view { display: none; margin-top: 10px; }
+        .player-header-controls {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;
+        }
+        .mode-btn {
+            background: #333; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;
+        }
+        .mode-btn.active { background: var(--accent-color); }
+        
+        .video-player-wrapper {
+            position: relative; width: 100%; aspect-ratio: 16/9; background: #000;
+            border-radius: 12px; overflow: hidden; user-select: none;
+        }
+        .video-player-wrapper.vertical-mode {
+            aspect-ratio: 9/16; max-height: 80vh; margin: 0 auto;
+        }
+        video { width: 100%; height: 100%; object-fit: contain; }
+        
+        .hud-overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.75); color: #fff; padding: 10px 18px; border-radius: 8px;
+            font-size: 1rem; pointer-events: none; opacity: 0; transition: opacity 0.2s;
+        }
+        .hud-overlay.show { opacity: 1; }
+        
+        .video-details { margin: 12px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .video-meta h2 { font-size: 1.1rem; margin-bottom: 4px; }
+        .video-meta p { color: var(--secondary-text); font-size: 0.85rem; }
+        
+        .action-buttons { display: flex; gap: 8px; }
+
+        .recommendations-section { margin-top: 24px; }
+        .recommendations-section h3 { font-size: 1rem; margin-bottom: 12px; }
+
+        /* Settings View Styles */
+        #settings-view { display: none; margin-top: 10px; }
+        .settings-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .settings-section { background: var(--surface-color); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+        .settings-section h3 { font-size: 1rem; margin-bottom: 12px; color: var(--accent-color); border-bottom: 1px solid var(--border-color); padding-bottom: 6px; }
+        .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
+        .setting-label { font-size: 0.95rem; }
+        .setting-desc { font-size: 0.8rem; color: var(--secondary-text); }
+        
+        .switch { position: relative; display: inline-block; width: 48px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .3s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent-color); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        .loader { text-align: center; padding: 40px; color: var(--secondary-text); }
+    </style>
+</head>
+<body>
+
+    <header id="app-header">
+        <div class="logo" id="logo-home">▶ WebTube Script</div>
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="Search videos...">
+            <button id="search-btn">Search</button>
+        </div>
+        <div class="header-icons">
+            <button class="icon-btn" id="settings-open-btn" title="Settings">⚙️</button>
+        </div>
+    </header>
+
+    <div class="nav-tabs" id="nav-tabs">
+        <button class="tab-btn active" data-tab="trending">Trending (The Mine)</button>
+        <button class="tab-btn" data-tab="subscriptions">Subscriptions</button>
+        <button class="tab-btn" data-tab="discover">✨ Discover Goldmine</button>
+        <button class="tab-btn" data-tab="playlists">Playlists</button>
+    </div>
+
+    <div class="container">
+        <!-- Feed / Grid View -->
+        <div id="feed-view">
+            <h2 id="feed-title" style="margin-bottom: 12px; font-size: 1.1rem;">Trending Feed</h2>
+            <div id="video-grid" class="video-grid">
+                <div class="loader">Connecting to resilient API pool...</div>
+            </div>
+        </div>
+
+        <!-- Watch / Player View -->
+        <div id="player-view">
+            <div class="player-header-controls">
+                <button class="mode-btn" id="back-to-feed">← Back</button>
+                <button class="mode-btn" id="vertical-toggle-btn">📱 Vertical Mode Toggle</button>
+            </div>
+            
+            <div class="video-player-wrapper" id="player-wrapper">
+                <video id="main-video" playsinline controls></video>
+                <div class="hud-overlay" id="hud-display">Volume: 100%</div>
+            </div>
+
+            <div class="video-details">
+                <div class="video-meta">
+                    <h2 id="watch-title">Video Title</h2>
+                    <p id="watch-channel">Channel Name</p>
+                </div>
+                <div class="action-buttons">
+                    <button class="mode-btn" id="subscribe-btn">⭐ Subscribe</button>
+                    <button class="mode-btn" id="add-playlist-btn">📂 Add to Playlist</button>
+                </div>
+            </div>
+
+            <div class="recommendations-section">
+                <h3>Recommended Videos</h3>
+                <div id="recommendations-grid" class="video-grid"></div>
+            </div>
+        </div>
+
+        <!-- Settings Page View -->
+        <div id="settings-view">
+            <div class="settings-header">
+                <h2>App Settings & Preferences</h2>
+                <button class="mode-btn" id="settings-back-btn">← Back</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>Playback & Rotation</h3>
+                <div class="setting-item">
+                    <div>
+                        <div class="setting-label">Auto-Rotate on Play</div>
+                        <div class="setting-desc">Automatically lock to landscape orientation when playback starts</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="setting-autorotate" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Gesture Controls</h3>
+                <div class="setting-item">
+                    <div>
+                        <div class="setting-label">Enable Gestures Engine</div>
+                        <div class="setting-desc">Swipe right for volume, double-tap left/right to skip backward/forward</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="setting-gestures" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Data Management</h3>
+                <div class="setting-item">
+                    <div>
+                        <div class="setting-label">Export / Backup Data</div>
+                        <div class="setting-desc">Download subscriptions and playlists as a JSON file</div>
+                    </div>
+                    <button class="mode-btn" id="export-data-btn">Export JSON</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Resilient API Pool (Auto-Failover List)
+        const API_POOL = [
+            'https://pipedapi.kavin.rocks',
+            'https://pipedapi.adminforge.de',
+            'https://pipedapi-libre.kavin.rocks',
+            'https://pipedapi.yt.privacydev.net'
+        ];
+
+        async function apiFetch(endpoint) {
+            for (let baseUrl of API_POOL) {
+                try {
+                    const res = await fetch(`${baseUrl}${endpoint}`);
+                    if (res.ok) {
+                        return await res.json();
+                    }
+                } catch (err) {
+                    console.warn(`Instance ${baseUrl} failed. Trying next...`);
+                }
+            }
+            throw new Error("All public Piped API instances are currently unreachable.");
+        }
+
+        // App State & LocalStorage Manager
+        let appSettings = {
+            autoRotate: true,
+            gesturesEnabled: true
+        };
+
+        let userSubscriptions = JSON.parse(localStorage.getItem('webtube_subs') || '[]');
+        let userPlaylists = JSON.parse(localStorage.getItem('webtube_playlists') || '{"Favorites": []}');
+        let currentVideoData = null;
+        let activeTab = 'trending';
+
+        function saveUserData() {
+            localStorage.setItem('webtube_subs', JSON.stringify(userSubscriptions));
+            localStorage.setItem('webtube_playlists', JSON.stringify(userPlaylists));
+            localStorage.setItem('webtube_settings', JSON.stringify(appSettings));
+        }
+
+        function loadSettings() {
+            const saved = localStorage.getItem('webtube_settings');
+            if (saved) { try { appSettings = JSON.parse(saved); } catch(e){} }
+            document.getElementById('setting-autorotate').checked = appSettings.autoRotate;
+            document.getElementById('setting-gestures').checked = appSettings.gesturesEnabled;
+        }
+
+        // DOM Elements
+        const feedView = document.getElementById('feed-view');
+        const playerView = document.getElementById('player-view');
+        const settingsView = document.getElementById('settings-view');
+        const videoGrid = document.getElementById('video-grid');
+        const recommendationsGrid = document.getElementById('recommendations-grid');
+        const mainVideo = document.getElementById('main-video');
+        const playerWrapper = document.getElementById('player-wrapper');
+        const watchTitle = document.getElementById('watch-title');
+        const watchChannel = document.getElementById('watch-channel');
+        const searchInput = document.getElementById('search-input');
+        const searchBtn = document.getElementById('search-btn');
+        const backToFeedBtn = document.getElementById('back-to-feed');
+        const verticalToggleBtn = document.getElementById('vertical-toggle-btn');
+        const subscribeBtn = document.getElementById('subscribe-btn');
+        const addPlaylistBtn = document.getElementById('add-playlist-btn');
+        const hudDisplay = document.getElementById('hud-display');
+        const feedTitle = document.getElementById('feed-title');
+        const settingsOpenBtn = document.getElementById('settings-open-btn');
+        const settingsBackBtn = document.getElementById('settings-back-btn');
+        const logoHome = document.getElementById('logo-home');
+        const navTabs = document.querySelectorAll('.tab-btn');
+
+        let isVerticalMode = false;
+
+        function switchView(viewName) {
+            feedView.style.display = viewName === 'feed' ? 'block' : 'none';
+            playerView.style.display = viewName === 'player' ? 'block' : 'none';
+            settingsView.style.display = viewName === 'settings' ? 'block' : 'none';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // 1. Load Trending Feed ("The Mine")
+        async function loadTrending() {
+            feedTitle.innerText = "Trending Feed (The Mine)";
+            videoGrid.innerHTML = '<div class="loader">Fetching raw discovery pool...</div>';
+            try {
+                const data = await apiFetch('/trending?region=US');
+                renderVideoGrid(data, videoGrid);
+            } catch (err) {
+                videoGrid.innerHTML = `<div class="loader">Failed to connect to backend pool. Please try again later.</div>`;
+            }
+        }
+
+        // 2. Subscriptions Feed
+        async function loadSubscriptions() {
+            feedTitle.innerText = "Your Subscriptions Feed";
+            if (userSubscriptions.length === 0) {
+                videoGrid.innerHTML = '<div class="loader">You have no subscriptions yet. Open a video and click Subscribe!</div>';
+                return;
+            }
+            videoGrid.innerHTML = '<div class="loader">Loading subscriptions...</div>';
+            try {
+                let allSubVideos = [];
+                for (let sub of userSubscriptions) {
+                    const data = await apiFetch(`/channel/${sub.id}`);
+                    if (data && data.relatedStreams) {
+                        allSubVideos.push(...data.relatedStreams);
+                    }
+                }
+                renderVideoGrid(allSubVideos, videoGrid);
+            } catch (err) {
+                videoGrid.innerHTML = `<div class="loader">Failed to load subscriptions feed.</div>`;
+            }
+        }
+
+        // 3. Discover Goldmine (Collaborations & Recommendations derived exclusively from Subscriptions)
+        async function loadDiscoverFeed() {
+            feedTitle.innerText = "✨ Discover Goldmine (Collaborations & New Creators)";
+            if (userSubscriptions.length === 0) {
+                videoGrid.innerHTML = '<div class="loader">Subscribe to a few channels first so the goldmine can discover related creators and collabs!</div>';
+                return;
+            }
+            videoGrid.innerHTML = '<div class="loader">Digging for gold from your subscriptions network...</div>';
+
+            try {
+                let discoveredVideos = [];
+                // Pick up to 3 random subscriptions to mine recommendations from
+                let shuffledSubs = [...userSubscriptions].sort(() => 0.5 - Math.random()).slice(0, 3);
+
+                for (let sub of shuffledSubs) {
+                    const chanData = await apiFetch(`/channel/${sub.id}`);
+                    if (chanData && chanData.relatedStreams && chanData.relatedStreams.length > 0) {
+                        // Pick a random recent video from this subscription
+                        let randomVideo = chanData.relatedStreams[Math.floor(Math.random() * Math.min(5, chanData.relatedStreams.length))];
+                        let vidId = randomVideo.url ? randomVideo.url.split('=')[1] : randomVideo.videoId;
+
+                        if (vidId) {
+                            const streamData = await apiFetch(`/streams/${vidId}`);
+                            if (streamData && streamData.relatedStreams) {
+                                // Filter out creators the user is already subscribed to, revealing collaborations & new channels
+                                let newRecs = streamData.relatedStreams.filter(rec => {
+                                    let recUploaderId = rec.uploaderUrl ? rec.uploaderUrl.split('/').pop() : '';
+                                    return !userSubscriptions.some(s => s.id === recUploaderId);
+                                });
+                                discoveredVideos.push(...newRecs);
+                            }
+                        }
+                    }
+                }
+
+                // Deduplicate items
+                let uniqueMap = new Map();
+                discoveredVideos.forEach(v => {
+                    let id = v.url ? v.url.split('=')[1] : v.videoId;
+                    if (id && !uniqueMap.has(id)) uniqueMap.set(id, v);
+                });
+
+                renderVideoGrid(Array.from(uniqueMap.values()), videoGrid);
+            } catch (err) {
+                console.error(err);
+                videoGrid.innerHTML = `<div class="loader">Failed to generate goldmine discovery feed. Try again later.</div>`;
+            }
+        }
+
+        // 4. Playlists View
+        function loadPlaylistsView() {
+            feedTitle.innerText = "Your Saved Playlists";
+            videoGrid.innerHTML = '';
+            
+            const playlistNames = Object.keys(userPlaylists);
+            if (playlistNames.length === 0 || playlistNames.every(p => userPlaylists[p].length === 0)) {
+                videoGrid.innerHTML = '<div class="loader">No saved videos in playlists yet.</div>';
+                return;
+            }
+
+            playlistNames.forEach(name => {
+                const vids = userPlayli
